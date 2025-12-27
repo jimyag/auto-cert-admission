@@ -18,7 +18,7 @@ spec:
       serviceAccountName: pod-label-injector
       containers:
       - name: webhook
-        image: docker.io/jimyag/pod-label-injector:latest
+        image: registry.i.jimyag.com/test/pod-label-injector:20251227-19-36-01
         imagePullPolicy: Always
         ports:
         - name: https
@@ -32,6 +32,16 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.name
+        # Optional: Override configuration via environment variables
+        # All ACW_* variables are optional - code configuration takes priority
+        # - name: ACW_PORT
+        #   value: "8443"
+        # - name: ACW_METRICS_PORT
+        #   value: "8080"
+        # - name: ACW_CA_VALIDITY
+        #   value: "720h"  # 30 days
+        # - name: ACW_CERT_VALIDITY
+        #   value: "168h"  # 7 days
         livenessProbe:
           httpGet:
             path: /healthz

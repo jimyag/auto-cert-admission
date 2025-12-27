@@ -2,6 +2,13 @@
 
 This example demonstrates a mutating webhook that automatically injects labels into pods.
 
+## What It Does
+
+When a pod is created in any namespace (except `kube-system` and `webhook-system`), the webhook automatically adds:
+
+- `injected-by: pod-label-injector` - Indicates the webhook modified this pod
+- `injection-time: admission` - Indicates when the modification occurred
+
 ## Prerequisites
 
 - Kubernetes cluster (v1.19+)
@@ -13,22 +20,24 @@ This example demonstrates a mutating webhook that automatically injects labels i
 ### 1. Build and Push Image
 
 ```bash
-# Build docker image
-make docker-build IMAGE=your-registry/pod-label-injector:latest
+cd examples/pod-mutating
 
-# Push to registry
-make docker-push IMAGE=your-registry/pod-label-injector:latest
+# Build and push with auto-generated timestamp tag
+make docker-build-push
 
-# Or do both
-make docker-build-push IMAGE=your-registry/pod-label-injector:latest
+# Or specify a custom tag
+make docker-build-push IMAGE_TAG=v1.0.0
+
+# Or use a different registry
+make docker-build-push IMAGE_REGISTRY=docker.io IMAGE_REPO=myrepo
 ```
 
 ### 2. Update Image in Deployment
 
-Edit `deploy/03-deployment.yaml` and update the image:
+Edit `deploy/03-deployment.yaml` and update the image with the tag from step 1:
 
 ```yaml
-image: your-registry/pod-label-injector:latest
+image: registry.i.jimyag.com/test/pod-label-injector:20251227-20-00-00
 ```
 
 ### 3. Deploy to Kubernetes
@@ -60,16 +69,26 @@ The `caBundle` field should be automatically populated after the webhook starts.
 
 ### 5. Test the Webhook
 
-Create a test pod in the default namespace:
+Run the automated test script:
 
 ```bash
-kubectl run test-pod --image=nginx --restart=Never
-
-# Check the labels
-kubectl get pod test-pod --show-labels
+make test
 ```
 
-You should see labels `injected-by=pod-label-injector` and `injection-time=admission`.
+Or test manually:
+
+```bash
+# Create a test pod
+kubectl run test-pod --image=nginx:1.25 --restart=Never \
+  --labels="app=test" \
+  --overrides='{"spec":{"containers":[{"name":"test-pod","image":"nginx:1.25","resources":{"limits":{"cpu":"100m","memory":"128Mi"}}}]}}'
+
+# Check the labels (should include injected-by and injection-time)
+kubectl get pod test-pod --show-labels
+
+# Cleanup
+kubectl delete pod test-pod
+```
 
 ### 6. Cleanup
 
@@ -82,7 +101,9 @@ kubectl delete -f deploy/
 
 ## Configuration
 
-The webhook can be customized by modifying `main.go`:
+The webhook can be configured via environment variables or in code. Environment variables use the `ACW_` prefix and override code defaults.
+
+### Code Configuration
 
 ```go
 func (p *podLabelInjector) Configure() webhook.Config {
@@ -95,6 +116,24 @@ func (p *podLabelInjector) Configure() webhook.Config {
 }
 ```
 
+### Environment Variables
+
+See the [main README](../../README.md#environment-variables) for the complete list of environment variables.
+
+## Makefile Targets
+
+| Target | Description |
+|--------|-------------|
+| `make build` | Build binary locally |
+| `make docker-build` | Build docker image |
+| `make docker-push` | Push docker image |
+| `make docker-build-push` | Build and push docker image (ensures same tag) |
+| `make deploy` | Deploy to Kubernetes |
+| `make undeploy` | Remove from Kubernetes |
+| `make test` | Run automated tests against deployed webhook |
+| `make clean` | Clean build artifacts |
+| `make help` | Show available targets |
+
 ## Project Structure
 
 ```
@@ -102,6 +141,8 @@ examples/pod-mutating/
 ├── main.go           # Webhook implementation
 ├── Dockerfile        # Container image build
 ├── Makefile          # Build automation
+├── test.sh           # Automated test script
+├── README.md         # This file
 └── deploy/
     ├── 00-namespace.yaml      # Namespace
     ├── 01-serviceaccount.yaml # ServiceAccount
