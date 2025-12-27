@@ -17,6 +17,11 @@ A lightweight framework for building Kubernetes admission webhooks with automati
 - Support multiple webhooks in a single server
 - Prometheus metrics for certificate monitoring
 
+## Requirements
+
+- **Go**: 1.25+
+- **Kubernetes**: 1.16+ (uses `admissionregistration.k8s.io/v1` API)
+
 ## Installation
 
 ```bash
