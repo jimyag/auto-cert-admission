@@ -9,7 +9,8 @@ A lightweight framework for building Kubernetes admission webhooks with automati
 - Hot-reload certificates via Secret informer (no file watching)
 - Automatic `caBundle` synchronization to WebhookConfiguration
 - Leader election for multi-replica deployments
-- Minimal user code required
+- Support multiple webhooks in a single server
+- Prometheus metrics for certificate monitoring
 
 ## Installation
 
@@ -26,36 +27,39 @@ import (
     "encoding/json"
 
     admissionv1 "k8s.io/api/admission/v1"
-    admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
     corev1 "k8s.io/api/core/v1"
 
     "github.com/jimyag/auto-cert-webhook/pkg/admission"
 )
 
 func main() {
-    admission.Run(&podMutator{})
+    admission.Run(&myWebhook{})
 }
 
-type podMutator struct{}
+type myWebhook struct{}
 
-func (p *podMutator) Configure() admission.WebhookConfig {
-    return admission.WebhookConfig{
-        Name:       "pod-mutator",
-        MutatePath: "/mutate",
-        Rules: []admissionregistrationv1.RuleWithOperations{{
-            Operations: []admissionregistrationv1.OperationType{
-                admissionregistrationv1.Create,
-            },
-            Rule: admissionregistrationv1.Rule{
-                APIGroups:   []string{""},
-                APIVersions: []string{"v1"},
-                Resources:   []string{"pods"},
-            },
-        }},
+func (m *myWebhook) Configure() admission.Config {
+    return admission.Config{
+        Name: "my-webhook",
     }
 }
 
-func (p *podMutator) Mutate(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
+func (m *myWebhook) Webhooks() []admission.Hook {
+    return []admission.Hook{
+        {
+            Path:  "/mutate-pods",
+            Type:  admission.Mutating,
+            Admit: m.mutatePod,
+        },
+        {
+            Path:  "/validate-pods",
+            Type:  admission.Validating,
+            Admit: m.validatePod,
+        },
+    }
+}
+
+func (m *myWebhook) mutatePod(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
     pod := &corev1.Pod{}
     json.Unmarshal(ar.Request.Object.Raw, pod)
 
@@ -67,19 +71,39 @@ func (p *podMutator) Mutate(ar admissionv1.AdmissionReview) *admissionv1.Admissi
 
     return admission.PatchResponse(pod, modified)
 }
+
+func (m *myWebhook) validatePod(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
+    // validation logic
+    return admission.Allowed()
+}
 ```
 
 ## Configuration
 
-Use functional options to customize behavior:
+### User Config (in Configure())
+
+```go
+func (m *myWebhook) Configure() admission.Config {
+    return admission.Config{
+        Name:        "my-webhook",           // Required: used for resource naming
+        Namespace:   "webhook-system",       // Optional: defaults to POD_NAMESPACE or "default"
+        ServiceName: "my-webhook-svc",       // Optional: defaults to Name
+        Port:        8443,                   // Optional: defaults to 8443
+        MetricsPort: 8080,                   // Optional: defaults to 8080
+    }
+}
+```
+
+### Functional Options
+
+Use options to override or extend configuration:
 
 ```go
 admission.Run(&myWebhook{},
     admission.WithNamespace("webhook-system"),
-    admission.WithServiceName("my-webhook"),
     admission.WithPort(8443),
-    admission.WithMetricsEnabled(true),  // default: true
-    admission.WithMetricsPort(8080),     // default: 8080
+    admission.WithMetricsEnabled(true),
+    admission.WithMetricsPort(8080),
     admission.WithCAValidity(365*24*time.Hour),
     admission.WithCertValidity(30*24*time.Hour),
     admission.WithLeaderElection(true),
@@ -99,6 +123,7 @@ admission.Run(&myWebhook{},
 │  All Pods:                                                   │
 │    - CertProvider (watch Secret, hot-reload)                │
 │    - TLS Server (serve admission requests)                  │
+│    - Metrics Server (Prometheus metrics)                    │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -110,14 +135,14 @@ The framework creates Secrets and ConfigMaps automatically. You need to create t
 apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingWebhookConfiguration
 metadata:
-  name: pod-mutator
+  name: my-webhook
 webhooks:
-- name: pod-mutator.default.svc
+- name: my-webhook.default.svc
   clientConfig:
     service:
-      name: pod-mutator
+      name: my-webhook
       namespace: default
-      path: /mutate
+      path: /mutate-pods
       port: 8443
     caBundle: ""  # auto-populated by the framework
   rules:
@@ -156,7 +181,7 @@ rules:
 
 ## Metrics
 
-The framework exposes Prometheus metrics on a separate HTTP port (default: enabled on port 8080). Use `WithMetricsEnabled(false)` to disable.
+The framework exposes Prometheus metrics on a separate HTTP port (default: 8080).
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
@@ -164,9 +189,7 @@ The framework exposes Prometheus metrics on a separate HTTP port (default: enabl
 | `admission_webhook_certificate_not_before_timestamp_seconds` | Gauge | `type` | Certificate not-before timestamp (unix seconds) |
 | `admission_webhook_certificate_valid_duration_seconds` | Gauge | `type` | Total certificate validity duration (seconds) |
 
-The `type` label is `serving` for the server certificate.
-
-Example Prometheus alert for certificate expiry:
+Example Prometheus alert:
 
 ```yaml
 groups:

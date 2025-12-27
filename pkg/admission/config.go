@@ -3,10 +3,15 @@ package admission
 import (
 	"os"
 	"time"
+
+	"github.com/jimyag/auto-cert-webhook/pkg/webhook"
 )
 
-// Config holds the server configuration.
-type Config struct {
+// ServerConfig holds the internal server configuration.
+type ServerConfig struct {
+	// Name is the webhook name.
+	Name string
+
 	// Namespace is the namespace where the webhook is deployed.
 	Namespace string
 
@@ -69,7 +74,6 @@ type Config struct {
 }
 
 const (
-	DefaultServiceName           = "auto-cert-webhook"
 	DefaultNamespace             = "default"
 	DefaultPort                  = 8443
 	DefaultMetricsEnabled        = true
@@ -77,55 +81,74 @@ const (
 	DefaultMetricsPath           = "/metrics"
 	DefaultHealthzPath           = "/healthz"
 	DefaultReadyzPath            = "/readyz"
-	DefaultCASecretName          = "auto-cert-webhook-ca"
-	DefaultCertSecretName        = "auto-cert-webhook-cert"
-	DefaultCABundleConfigMapName = "auto-cert-webhook-ca-bundle"
 	DefaultCAValidity            = 2 * 24 * time.Hour
 	DefaultCARefresh             = 1 * 24 * time.Hour
 	DefaultCertValidity          = 1 * 24 * time.Hour
-	DefaultCertRefresh           = 0.5 * 24 * time.Hour
+	DefaultCertRefresh           = 12 * time.Hour
 	DefaultLeaderElection        = true
-	DefaultLeaderElectionID      = "auto-cert-webhook-cert-leader"
 	DefaultLeaseDuration         = 30 * time.Second
 	DefaultRenewDeadline         = 10 * time.Second
 	DefaultRetryPeriod           = 5 * time.Second
 )
 
-// DefaultConfig returns a Config with default values.
-func DefaultConfig() *Config {
+// DefaultServerConfig returns a ServerConfig with default values.
+func DefaultServerConfig() *ServerConfig {
 	namespace := os.Getenv("POD_NAMESPACE")
 	if namespace == "" {
 		namespace = DefaultNamespace
 	}
 
-	return &Config{
-		Namespace:             namespace,
-		ServiceName:           DefaultServiceName,
-		Port:                  DefaultPort,
-		MetricsEnabled:        DefaultMetricsEnabled,
-		MetricsPort:           DefaultMetricsPort,
-		HealthzPath:           DefaultHealthzPath,
-		ReadyzPath:            DefaultReadyzPath,
-		MetricsPath:           DefaultMetricsPath,
-		CASecretName:          DefaultCASecretName,
-		CertSecretName:        DefaultCertSecretName,
-		CABundleConfigMapName: DefaultCABundleConfigMapName,
-		CAValidity:            DefaultCAValidity,
-		CARefresh:             DefaultCARefresh,
-		CertValidity:          DefaultCertValidity,
-		CertRefresh:           DefaultCertRefresh,
+	return &ServerConfig{
+		Namespace:      namespace,
+		Port:           DefaultPort,
+		MetricsEnabled: DefaultMetricsEnabled,
+		MetricsPort:    DefaultMetricsPort,
+		HealthzPath:    DefaultHealthzPath,
+		ReadyzPath:     DefaultReadyzPath,
+		MetricsPath:    DefaultMetricsPath,
+		CAValidity:     DefaultCAValidity,
+		CARefresh:      DefaultCARefresh,
+		CertValidity:   DefaultCertValidity,
+		CertRefresh:    DefaultCertRefresh,
+		LeaderElection: DefaultLeaderElection,
+		LeaseDuration:  DefaultLeaseDuration,
+		RenewDeadline:  DefaultRenewDeadline,
+		RetryPeriod:    DefaultRetryPeriod,
 	}
 }
 
-// ApplyWebhookConfig applies webhook-specific configuration.
-func (c *Config) ApplyWebhookConfig(wc WebhookConfig) {
-	if wc.Name != "" {
-		c.CASecretName = wc.Name + "-ca"
-		c.CertSecretName = wc.Name + "-cert"
-		c.CABundleConfigMapName = wc.Name + "-ca-bundle"
-		c.LeaderElectionID = wc.Name + "-cert-leader"
-		if c.ServiceName == DefaultServiceName {
-			c.ServiceName = wc.Name
-		}
+// ApplyUserConfig applies user-provided webhook.Config to the server config.
+func (c *ServerConfig) ApplyUserConfig(userCfg webhook.Config) {
+	if userCfg.Name != "" {
+		c.Name = userCfg.Name
+		c.ServiceName = userCfg.Name
+		c.CASecretName = userCfg.Name + "-ca"
+		c.CertSecretName = userCfg.Name + "-cert"
+		c.CABundleConfigMapName = userCfg.Name + "-ca-bundle"
+		c.LeaderElectionID = userCfg.Name + "-leader"
+	}
+
+	if userCfg.Namespace != "" {
+		c.Namespace = userCfg.Namespace
+	}
+
+	if userCfg.ServiceName != "" {
+		c.ServiceName = userCfg.ServiceName
+	}
+
+	if userCfg.Port > 0 {
+		c.Port = userCfg.Port
+	}
+
+	if userCfg.MetricsPort > 0 {
+		c.MetricsPort = userCfg.MetricsPort
+	}
+
+	if userCfg.MetricsEnabled != nil {
+		c.MetricsEnabled = *userCfg.MetricsEnabled
+	}
+
+	if userCfg.LeaderElection != nil {
+		c.LeaderElection = *userCfg.LeaderElection
 	}
 }

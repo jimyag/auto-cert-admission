@@ -27,39 +27,18 @@ func init() {
 	}
 }
 
-// validatingHandler handles validating admission requests.
-type validatingHandler struct {
-	webhook webhook.ValidatingWebhook
+// admissionHandler handles admission requests.
+type admissionHandler struct {
+	admit webhook.AdmitFunc
 }
 
-func newValidatingHandler(wh webhook.ValidatingWebhook) *validatingHandler {
-	return &validatingHandler{webhook: wh}
+func newAdmissionHandler(admit webhook.AdmitFunc) *admissionHandler {
+	return &admissionHandler{admit: admit}
 }
 
-func (h *validatingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	handleAdmission(w, r, func(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
-		return h.webhook.Validate(ar)
-	})
-}
+func (h *admissionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	klog.V(2).Infof("Handling admission request: %s %s", r.Method, r.URL.Path)
 
-// mutatingHandler handles mutating admission requests.
-type mutatingHandler struct {
-	webhook webhook.MutatingWebhook
-}
-
-func newMutatingHandler(wh webhook.MutatingWebhook) *mutatingHandler {
-	return &mutatingHandler{webhook: wh}
-}
-
-func (h *mutatingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	handleAdmission(w, r, func(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
-		return h.webhook.Mutate(ar)
-	})
-}
-
-// handleAdmission handles admission requests with the given handler function.
-func handleAdmission(w http.ResponseWriter, r *http.Request, handle func(admissionv1.AdmissionReview) *admissionv1.AdmissionResponse) {
-	klog.Infof("Handling admission request: %s %s", r.Method, r.URL.Path)
 	var body []byte
 	if r.Body != nil {
 		defer r.Body.Close()
@@ -85,7 +64,7 @@ func handleAdmission(w http.ResponseWriter, r *http.Request, handle func(admissi
 		return
 	}
 
-	klog.Infof("Handling admission request: %s", string(body))
+	klog.V(4).Infof("Request body: %s", string(body))
 
 	// Decode the request
 	requestedAdmissionReview := admissionv1.AdmissionReview{}
@@ -113,7 +92,7 @@ func handleAdmission(w http.ResponseWriter, r *http.Request, handle func(admissi
 			},
 		}
 	} else {
-		responseAdmissionReview.Response = handle(requestedAdmissionReview)
+		responseAdmissionReview.Response = h.admit(requestedAdmissionReview)
 	}
 
 	// Set the UID

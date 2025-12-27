@@ -8,17 +8,26 @@ import (
 
 // Re-export types from webhook package for convenience
 type (
-	// Webhook is the base interface that all webhooks must implement.
-	Webhook = webhook.Webhook
+	// Admission is the main interface that users need to implement.
+	Admission = webhook.Admission
 
-	// ValidatingWebhook is the interface for validating admission webhooks.
-	ValidatingWebhook = webhook.ValidatingWebhook
+	// Config contains the server-level configuration.
+	Config = webhook.Config
 
-	// MutatingWebhook is the interface for mutating admission webhooks.
-	MutatingWebhook = webhook.MutatingWebhook
+	// Hook defines a single admission webhook endpoint.
+	Hook = webhook.Hook
 
-	// WebhookConfig contains the configuration for a webhook.
-	WebhookConfig = webhook.Config
+	// HookType defines the type of admission webhook.
+	HookType = webhook.HookType
+
+	// AdmitFunc is the function signature for handling admission requests.
+	AdmitFunc = webhook.AdmitFunc
+)
+
+// Re-export constants
+const (
+	Mutating   = webhook.Mutating
+	Validating = webhook.Validating
 )
 
 // Re-export functions from webhook package
@@ -49,7 +58,4 @@ var (
 
 	// PatchResponseFromPatches creates a patch response from pre-built patches.
 	PatchResponseFromPatches = webhook.PatchResponseFromPatches
-
-	// DefaultWebhookConfig returns a WebhookConfig with default values applied.
-	DefaultWebhookConfig = webhook.DefaultConfig
 )

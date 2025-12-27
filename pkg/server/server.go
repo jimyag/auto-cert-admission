@@ -46,16 +46,10 @@ func New(certProvider *certprovider.Provider, config Config) *Server {
 	return s
 }
 
-// RegisterValidatingWebhook registers a validating webhook handler.
-func (s *Server) RegisterValidatingWebhook(path string, wh webhook.ValidatingWebhook) {
-	s.mux.Handle(path, newValidatingHandler(wh))
-	klog.Infof("Registered validating webhook at %s", path)
-}
-
-// RegisterMutatingWebhook registers a mutating webhook handler.
-func (s *Server) RegisterMutatingWebhook(path string, wh webhook.MutatingWebhook) {
-	s.mux.Handle(path, newMutatingHandler(wh))
-	klog.Infof("Registered mutating webhook at %s", path)
+// RegisterHook registers a webhook handler at the given path.
+func (s *Server) RegisterHook(path string, hookType webhook.HookType, admit webhook.AdmitFunc) {
+	s.mux.Handle(path, newAdmissionHandler(admit))
+	klog.V(2).Infof("Registered %s webhook at %s", hookType, path)
 }
 
 // Start starts the HTTPS server.

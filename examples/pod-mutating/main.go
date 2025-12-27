@@ -5,7 +5,6 @@ import (
 	"flag"
 
 	admissionv1 "k8s.io/api/admission/v1"
-	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 
@@ -24,28 +23,26 @@ func main() {
 // podLabelInjector is a mutating webhook that injects labels into pods.
 type podLabelInjector struct{}
 
-// Configure returns the webhook configuration.
-func (p *podLabelInjector) Configure() admission.WebhookConfig {
-	return admission.WebhookConfig{
-		Name:       "pod-label-injector",
-		MutatePath: "/mutate",
-		Rules: []admissionregistrationv1.RuleWithOperations{
-			{
-				Operations: []admissionregistrationv1.OperationType{
-					admissionregistrationv1.Create,
-				},
-				Rule: admissionregistrationv1.Rule{
-					APIGroups:   []string{""},
-					APIVersions: []string{"v1"},
-					Resources:   []string{"pods"},
-				},
-			},
+// Configure returns the server-level configuration.
+func (p *podLabelInjector) Configure() admission.Config {
+	return admission.Config{
+		Name: "pod-label-injector",
+	}
+}
+
+// Webhooks returns all webhook definitions.
+func (p *podLabelInjector) Webhooks() []admission.Hook {
+	return []admission.Hook{
+		{
+			Path:  "/mutate-pods",
+			Type:  admission.Mutating,
+			Admit: p.mutatePod,
 		},
 	}
 }
 
-// Mutate handles the mutating admission request.
-func (p *podLabelInjector) Mutate(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
+// mutatePod handles the mutating admission request.
+func (p *podLabelInjector) mutatePod(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
 	klog.V(2).Infof("Mutating pod %s/%s", ar.Request.Namespace, ar.Request.Name)
 
 	// Parse the pod

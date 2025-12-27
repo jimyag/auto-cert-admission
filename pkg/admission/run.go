@@ -20,31 +20,40 @@ import (
 	"github.com/jimyag/auto-cert-webhook/pkg/webhook"
 )
 
-// Run starts the webhook server with the given webhook implementation.
+// Run starts the webhook server with the given Admission implementation.
 // This is the main entry point for using this library.
-func Run(wh Webhook, opts ...Option) error {
+func Run(admission Admission, opts ...Option) error {
 	// Setup signal handling
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	return RunWithContext(ctx, wh, opts...)
+	return RunWithContext(ctx, admission, opts...)
 }
 
 // RunWithContext starts the webhook server with the given context.
-func RunWithContext(ctx context.Context, wh Webhook, opts ...Option) error {
-	// Get webhook configuration
-	webhookConfig := wh.Configure()
+func RunWithContext(ctx context.Context, admission Admission, opts ...Option) error {
+	// Get user configuration
+	userConfig := admission.Configure()
+	hooks := admission.Webhooks()
+
+	if userConfig.Name == "" {
+		return fmt.Errorf("webhook name is required in Configure()")
+	}
+
+	if len(hooks) == 0 {
+		return fmt.Errorf("at least one webhook hook is required in Webhooks()")
+	}
 
 	// Apply default configuration
-	config := DefaultConfig()
-	config.ApplyWebhookConfig(webhookConfig)
+	config := DefaultServerConfig()
+	config.ApplyUserConfig(userConfig)
 
 	// Apply options
 	for _, opt := range opts {
 		opt(config)
 	}
 
-	klog.Infof("Starting webhook %s in namespace %s", webhookConfig.Name, config.Namespace)
+	klog.Infof("Starting webhook %s in namespace %s", config.Name, config.Namespace)
 
 	// Create Kubernetes client
 	k8sCfg, err := rest.InClusterConfig()
@@ -59,8 +68,8 @@ func RunWithContext(ctx context.Context, wh Webhook, opts ...Option) error {
 
 	errCh := make(chan error, 1)
 
-	// Determine webhook types and refs
-	webhookRefs := determineWebhookRefs(wh, webhookConfig)
+	// Determine webhook refs for CA bundle syncer
+	webhookRefs := determineWebhookRefs(config.Name, hooks)
 
 	// Create certificate provider (runs on all pods)
 	certProvider := certprovider.New(client, config.Namespace, config.CertSecretName)
@@ -79,7 +88,12 @@ func RunWithContext(ctx context.Context, wh Webhook, opts ...Option) error {
 		HealthzPath: config.HealthzPath,
 		ReadyzPath:  config.ReadyzPath,
 	})
-	registerWebhookHandlers(srv, wh, webhookConfig)
+
+	// Register webhook handlers
+	for _, hook := range hooks {
+		srv.RegisterHook(hook.Path, hook.Type, hook.Admit)
+		klog.Infof("Registered %s webhook at path %s", hook.Type, hook.Path)
+	}
 
 	// Start HTTP server in background
 	go func() {
@@ -130,9 +144,7 @@ func RunWithContext(ctx context.Context, wh Webhook, opts ...Option) error {
 			}, leaderelection.Callbacks{
 				OnStartedLeading: func(leaderCtx context.Context) {
 					klog.Info("Became leader, starting certificate management")
-
-					// Start certificate manager
-					startCA(leaderCtx, certMgr, caBundleSyncer, errCh)
+					startCertManagement(leaderCtx, certMgr, caBundleSyncer, errCh)
 				},
 				OnStoppedLeading: func() {
 					klog.Info("Lost leadership")
@@ -145,8 +157,7 @@ func RunWithContext(ctx context.Context, wh Webhook, opts ...Option) error {
 	} else {
 		// Run without leader election (single replica mode)
 		klog.Info("Running without leader election")
-
-		startCA(ctx, certMgr, caBundleSyncer, errCh)
+		startCertManagement(ctx, certMgr, caBundleSyncer, errCh)
 	}
 
 	// Wait for context cancellation or error
@@ -160,7 +171,7 @@ func RunWithContext(ctx context.Context, wh Webhook, opts ...Option) error {
 	}
 }
 
-func startCA(ctx context.Context, certMgr *certmanager.Manager, caBundleSyncer *cabundle.Syncer, errCh chan error) {
+func startCertManagement(ctx context.Context, certMgr *certmanager.Manager, caBundleSyncer *cabundle.Syncer, errCh chan error) {
 	go func() {
 		if err := certMgr.Start(ctx); err != nil {
 			klog.Errorf("Certificate manager error: %v", err)
@@ -176,42 +187,29 @@ func startCA(ctx context.Context, certMgr *certmanager.Manager, caBundleSyncer *
 	}()
 }
 
-// determineWebhookRefs determines webhook references based on the webhook implementation.
-func determineWebhookRefs(wh Webhook, webhookConfig WebhookConfig) []cabundle.WebhookRef {
+// determineWebhookRefs determines webhook references for CA bundle syncing.
+func determineWebhookRefs(name string, hooks []webhook.Hook) []cabundle.WebhookRef {
 	var refs []cabundle.WebhookRef
 
-	if _, ok := wh.(webhook.ValidatingWebhook); ok {
-		refs = append(refs, cabundle.WebhookRef{
-			Name: webhookConfig.Name,
-			Type: cabundle.ValidatingWebhook,
-		})
-	}
+	hasMutating := false
+	hasValidating := false
 
-	if _, ok := wh.(webhook.MutatingWebhook); ok {
-		refs = append(refs, cabundle.WebhookRef{
-			Name: webhookConfig.Name,
-			Type: cabundle.MutatingWebhook,
-		})
+	for _, hook := range hooks {
+		if hook.Type == webhook.Mutating && !hasMutating {
+			refs = append(refs, cabundle.WebhookRef{
+				Name: name,
+				Type: cabundle.MutatingWebhook,
+			})
+			hasMutating = true
+		}
+		if hook.Type == webhook.Validating && !hasValidating {
+			refs = append(refs, cabundle.WebhookRef{
+				Name: name,
+				Type: cabundle.ValidatingWebhook,
+			})
+			hasValidating = true
+		}
 	}
 
 	return refs
-}
-
-// registerWebhookHandlers registers webhook handlers based on the webhook implementation.
-func registerWebhookHandlers(srv *server.Server, wh Webhook, webhookConfig WebhookConfig) {
-	if v, ok := wh.(webhook.ValidatingWebhook); ok {
-		path := webhookConfig.ValidatePath
-		if path == "" {
-			path = "/validate"
-		}
-		srv.RegisterValidatingWebhook(path, v)
-	}
-
-	if m, ok := wh.(webhook.MutatingWebhook); ok {
-		path := webhookConfig.MutatePath
-		if path == "" {
-			path = "/mutate"
-		}
-		srv.RegisterMutatingWebhook(path, m)
-	}
 }
