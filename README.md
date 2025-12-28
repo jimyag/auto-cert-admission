@@ -142,15 +142,52 @@ func ptr[T any](v T) *T { return &v }
 └─────────────────────────────────────────────────────────────┘
 ```
 
+## Conventions
+
+The framework uses the following naming and structure conventions:
+
+### Resource Naming
+
+| Resource | Default Name | Description |
+|----------|--------------|-------------|
+| CA Secret | `<Name>-ca` | Stores CA certificate and private key |
+| Cert Secret | `<Name>-cert` | Stores server certificate and private key |
+| CA Bundle ConfigMap | `<Name>-ca-bundle` | Stores CA bundle for webhook clients |
+| Leader Election Lease | `<Name>-leader` | Lease resource for leader election |
+| MutatingWebhookConfiguration | `<Name>` | Must match `Config.Name` |
+| ValidatingWebhookConfiguration | `<Name>` | Must match `Config.Name` |
+
+### Secret and ConfigMap Structure
+
+CA Secret (`kubernetes.io/tls`):
+- `tls.crt`: CA certificate (PEM)
+- `tls.key`: CA private key (PEM)
+
+Cert Secret (`kubernetes.io/tls`):
+- `tls.crt`: Server certificate (PEM)
+- `tls.key`: Server private key (PEM)
+
+CA Bundle ConfigMap:
+- `ca-bundle.crt`: CA certificate bundle (PEM)
+
+### Environment Variables for Pod Identity
+
+| Variable | Description |
+|----------|-------------|
+| `POD_NAME` | Used as leader election identity (falls back to hostname) |
+| `POD_NAMESPACE` | Namespace detection (falls back to ServiceAccount namespace file) |
+
 ## Prerequisites
 
-The framework creates Secrets and ConfigMaps automatically. You need to create the WebhookConfiguration manually or via Helm/Kustomize:
+The framework creates Secrets and ConfigMaps automatically. You need to create the WebhookConfiguration manually or via Helm/Kustomize.
+
+Important: The `MutatingWebhookConfiguration` and/or `ValidatingWebhookConfiguration` must have the same name as `Config.Name`. The framework uses this name to find and patch the `caBundle` field automatically.
 
 ```yaml
 apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingWebhookConfiguration
 metadata:
-  name: my-webhook
+  name: my-webhook  # Must match Config.Name
 webhooks:
 - name: my-webhook.default.svc
   clientConfig:

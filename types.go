@@ -36,9 +36,15 @@ type Hook struct {
 // Config contains all configuration for the webhook server.
 // Configuration priority: code > environment variables > defaults.
 // All environment variables use the "ACW_" prefix.
+//
+// IMPORTANT: The framework expects the MutatingWebhookConfiguration and/or
+// ValidatingWebhookConfiguration resources to have the same name as Config.Name.
+// The framework will automatically patch the caBundle field of these resources.
 type Config struct {
 	// Name is the webhook name, used for generating certificate resources.
 	// This will be used as prefix for Secret, ConfigMap, and Lease names.
+	// IMPORTANT: The MutatingWebhookConfiguration and ValidatingWebhookConfiguration
+	// must use this same name for automatic caBundle patching to work.
 	// Required. Env: ACW_NAME
 	Name string `envconfig:"NAME"`
 
