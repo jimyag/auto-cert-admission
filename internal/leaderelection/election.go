@@ -14,6 +14,8 @@ import (
 	"k8s.io/klog/v2"
 )
 
+const defaultRetryPeriod = 5 * time.Second
+
 // Config holds leader election configuration.
 type Config struct {
 	// Namespace is the namespace for the lease resource.
@@ -44,8 +46,12 @@ type Callbacks struct {
 	OnNewLeader func(identity string)
 }
 
-// Run runs the leader election with the given callbacks.
-func Run(ctx context.Context, client kubernetes.Interface, config Config, callbacks Callbacks) error {
+var runLeaderElectionAttempt = func(
+	ctx context.Context,
+	client kubernetes.Interface,
+	config Config,
+	callbacks Callbacks,
+) error {
 	identity := getIdentity()
 
 	lock := &resourcelock.LeaseLock{
@@ -97,6 +103,35 @@ func Run(ctx context.Context, client kubernetes.Interface, config Config, callba
 	klog.Infof("Starting leader election with identity %s", identity)
 	leaderElector.Run(ctx)
 	return nil
+}
+
+// Run runs the leader election with the given callbacks.
+func Run(ctx context.Context, client kubernetes.Interface, config Config, callbacks Callbacks) error {
+	if config.RetryPeriod <= 0 {
+		config.RetryPeriod = defaultRetryPeriod
+	}
+
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil
+		}
+
+		if err := runLeaderElectionAttempt(ctx, client, config, callbacks); err != nil {
+			return err
+		}
+
+		if err := ctx.Err(); err != nil {
+			return nil
+		}
+
+		klog.Warning("Leader election stopped without context cancellation, retrying")
+
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(config.RetryPeriod):
+		}
+	}
 }
 
 // getIdentity returns the identity for this instance.

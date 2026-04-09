@@ -105,7 +105,7 @@ func RunWithContext(ctx context.Context, admission Admission) error {
 		return fmt.Errorf("failed to create Kubernetes client: %w", err)
 	}
 
-	errCh := make(chan error, 6) // Buffer for: certProvider, server, metrics, certManager, caBundleSyncer, leaderElection
+	errCh := make(chan error, 6) // Buffer for process-wide senders; leader-scoped components only report non-cancellation errors.
 
 	// Determine webhook refs for CA bundle syncer
 	webhookRefs := determineWebhookRefs(cfg.Name, hooks)
@@ -115,10 +115,7 @@ func RunWithContext(ctx context.Context, admission Admission) error {
 
 	// Start certificate provider in background
 	go func() {
-		if err := certProvider.Start(ctx); err != nil {
-			klog.Errorf("Certificate provider error: %v", err)
-			errCh <- err
-		}
+		reportAsyncError(ctx, errCh, "certificate provider", certProvider.Start(ctx))
 	}()
 
 	// Create and start HTTP server (runs on all pods)
@@ -136,10 +133,7 @@ func RunWithContext(ctx context.Context, admission Admission) error {
 
 	// Start HTTP server in background
 	go func() {
-		if err := srv.Start(ctx); err != nil {
-			klog.Errorf("Server error: %v", err)
-			errCh <- err
-		}
+		reportAsyncError(ctx, errCh, "server", srv.Start(ctx))
 	}()
 
 	// Start metrics server if enabled
@@ -150,34 +144,15 @@ func RunWithContext(ctx context.Context, admission Admission) error {
 			Path: cfg.MetricsPath,
 		})
 		go func() {
-			if err := metricsSrv.Start(ctx); err != nil {
-				klog.Errorf("Metrics server error: %v", err)
-				errCh <- err
-			}
+			reportAsyncError(ctx, errCh, "metrics server", metricsSrv.Start(ctx))
 		}()
 	}
-
-	// Create certificate manager and CA bundle syncer (runs on leader only)
-	certMgr := certmanager.New(client, certmanager.Config{
-		Namespace:             cfg.Namespace,
-		ServiceName:           cfg.ServiceName,
-		CASecretName:          cfg.CASecretName,
-		CertSecretName:        cfg.CertSecretName,
-		CABundleConfigMapName: cfg.CABundleConfigMapName,
-		CAValidity:            cfg.CAValidity,
-		CARefresh:             cfg.CARefresh,
-		CertValidity:          cfg.CertValidity,
-		CertRefresh:           cfg.CertRefresh,
-		SyncInterval:          cfg.CertSyncInterval,
-	})
-
-	caBundleSyncer := cabundle.NewSyncer(client, cfg.Namespace, cfg.CABundleConfigMapName, webhookRefs)
 
 	leaderElectionEnabled := cfg.LeaderElection == nil || *cfg.LeaderElection
 	if leaderElectionEnabled {
 		// Run with leader election
 		go func() {
-			if err := leaderelection.Run(ctx, client, leaderelection.Config{
+			reportAsyncError(ctx, errCh, "leader election", leaderelection.Run(ctx, client, leaderelection.Config{
 				Namespace:     cfg.Namespace,
 				Name:          cfg.LeaderElectionID,
 				LeaseDuration: cfg.LeaseDuration,
@@ -186,19 +161,18 @@ func RunWithContext(ctx context.Context, admission Admission) error {
 			}, leaderelection.Callbacks{
 				OnStartedLeading: func(leaderCtx context.Context) {
 					klog.Info("Became leader, starting certificate management")
+					certMgr, caBundleSyncer := newLeaderComponents(client, cfg, webhookRefs)
 					startCertManagement(leaderCtx, certMgr, caBundleSyncer, errCh)
 				},
 				OnStoppedLeading: func() {
 					klog.Info("Lost leadership")
 				},
-			}); err != nil {
-				klog.Errorf("Leader election error: %v", err)
-				errCh <- err
-			}
+			}))
 		}()
 	} else {
 		// Run without leader election (single replica mode)
 		klog.Info("Running without leader election")
+		certMgr, caBundleSyncer := newLeaderComponents(client, cfg, webhookRefs)
 		startCertManagement(ctx, certMgr, caBundleSyncer, errCh)
 	}
 
@@ -318,18 +292,61 @@ func getNamespace() string {
 
 func startCertManagement(ctx context.Context, certMgr *certmanager.Manager, caBundleSyncer *cabundle.Syncer, errCh chan error) {
 	go func() {
-		if err := certMgr.Start(ctx); err != nil {
-			klog.Errorf("Certificate manager error: %v", err)
-			errCh <- err
-		}
+		reportAsyncError(ctx, errCh, "certificate manager", certMgr.Start(ctx))
 	}()
 
 	go func() {
-		if err := caBundleSyncer.Start(ctx); err != nil {
-			klog.Errorf("CA bundle syncer error: %v", err)
-			errCh <- err
-		}
+		reportAsyncError(ctx, errCh, "CA bundle syncer", caBundleSyncer.Start(ctx))
 	}()
+}
+
+func newLeaderComponents(client kubernetes.Interface, cfg Config, webhookRefs []cabundle.WebhookRef) (*certmanager.Manager, *cabundle.Syncer) {
+	certMgr := certmanager.New(client, newLeaderCertManagerConfig(cfg))
+	syncerCfg := newLeaderSyncerConfig(cfg, webhookRefs)
+	caBundleSyncer := cabundle.NewSyncer(client, syncerCfg.Namespace, syncerCfg.CABundleConfigMapName, syncerCfg.WebhookRefs)
+	return certMgr, caBundleSyncer
+}
+
+func newLeaderCertManagerConfig(cfg Config) certmanager.Config {
+	return certmanager.Config{
+		Namespace:             cfg.Namespace,
+		ServiceName:           cfg.ServiceName,
+		CASecretName:          cfg.CASecretName,
+		CertSecretName:        cfg.CertSecretName,
+		CABundleConfigMapName: cfg.CABundleConfigMapName,
+		CAValidity:            cfg.CAValidity,
+		CARefresh:             cfg.CARefresh,
+		CertValidity:          cfg.CertValidity,
+		CertRefresh:           cfg.CertRefresh,
+		SyncInterval:          cfg.CertSyncInterval,
+	}
+}
+
+type leaderSyncerConfig struct {
+	Namespace             string
+	CABundleConfigMapName string
+	WebhookRefs           []cabundle.WebhookRef
+}
+
+func newLeaderSyncerConfig(cfg Config, webhookRefs []cabundle.WebhookRef) leaderSyncerConfig {
+	return leaderSyncerConfig{
+		Namespace:             cfg.Namespace,
+		CABundleConfigMapName: cfg.CABundleConfigMapName,
+		WebhookRefs:           append([]cabundle.WebhookRef(nil), webhookRefs...),
+	}
+}
+
+func reportAsyncError(ctx context.Context, errCh chan<- error, component string, err error) {
+	if err == nil {
+		return
+	}
+	if ctx.Err() != nil {
+		klog.V(2).Infof("Ignoring %s shutdown error after context cancellation: %v", component, err)
+		return
+	}
+
+	klog.Errorf("%s error: %v", component, err)
+	errCh <- err
 }
 
 // validateCertDurations validates that certificate duration configurations are valid.

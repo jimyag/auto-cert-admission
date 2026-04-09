@@ -2,9 +2,13 @@ package leaderelection
 
 import (
 	"context"
+	"errors"
 	"os"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"k8s.io/client-go/kubernetes"
 )
 
 func TestGetIdentity(t *testing.T) {
@@ -90,5 +94,67 @@ func TestConfig(t *testing.T) {
 	}
 	if config.LeaseDuration != 60*time.Second {
 		t.Errorf("LeaseDuration: got %v, want %v", config.LeaseDuration, 60*time.Second)
+	}
+}
+
+func TestRunRetriesLeaderElectionUntilContextCancelled(t *testing.T) {
+	original := runLeaderElectionAttempt
+	t.Cleanup(func() {
+		runLeaderElectionAttempt = original
+	})
+
+	var attempts atomic.Int32
+	ctx, cancel := context.WithCancel(context.Background())
+
+	runLeaderElectionAttempt = func(
+		attemptCtx context.Context,
+		_ kubernetes.Interface,
+		_ Config,
+		_ Callbacks,
+	) error {
+		n := attempts.Add(1)
+		if attemptCtx != ctx {
+			t.Fatalf("attempt context mismatch")
+		}
+		if n == 2 {
+			cancel()
+		}
+		return nil
+	}
+
+	if err := Run(ctx, nil, Config{RetryPeriod: time.Millisecond}, Callbacks{}); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	if got := attempts.Load(); got != 2 {
+		t.Fatalf("leader election attempts = %d, want 2", got)
+	}
+}
+
+func TestRunUsesDefaultRetryPeriodWhenUnset(t *testing.T) {
+	original := runLeaderElectionAttempt
+	t.Cleanup(func() {
+		runLeaderElectionAttempt = original
+	})
+
+	var captured Config
+	ctx, cancel := context.WithCancel(context.Background())
+	runLeaderElectionAttempt = func(
+		_ context.Context,
+		_ kubernetes.Interface,
+		config Config,
+		_ Callbacks,
+	) error {
+		captured = config
+		cancel()
+		return errors.New("stop")
+	}
+
+	if err := Run(ctx, nil, Config{}, Callbacks{}); err == nil {
+		t.Fatal("Run() error = nil, want non-nil sentinel error")
+	}
+
+	if captured.RetryPeriod != defaultRetryPeriod {
+		t.Fatalf("RetryPeriod = %v, want %v", captured.RetryPeriod, defaultRetryPeriod)
 	}
 }
