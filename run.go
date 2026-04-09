@@ -105,7 +105,7 @@ func RunWithContext(ctx context.Context, admission Admission) error {
 		return fmt.Errorf("failed to create Kubernetes client: %w", err)
 	}
 
-	errCh := make(chan error, 6) // Buffer for process-wide senders; leader-scoped components only report non-cancellation errors.
+	errCh := make(chan error, 7) // Buffer for process-wide senders: certificate provider, server, metrics server, leader metrics observer, leader election, and leader-scoped components that only report non-cancellation errors.
 
 	// Determine webhook refs for CA bundle syncer
 	webhookRefs := determineWebhookRefs(cfg.Name, hooks)
@@ -150,6 +150,10 @@ func RunWithContext(ctx context.Context, admission Admission) error {
 
 	leaderElectionEnabled := cfg.LeaderElection == nil || *cfg.LeaderElection
 	if leaderElectionEnabled {
+		go func() {
+			reportAsyncError(ctx, errCh, "leader metrics observer", metrics.StartLeaderObserver(ctx, client, cfg.Namespace, cfg.LeaderElectionID))
+		}()
+
 		// Run with leader election
 		go func() {
 			reportAsyncError(ctx, errCh, "leader election", leaderelection.Run(ctx, client, leaderelection.Config{
@@ -172,6 +176,7 @@ func RunWithContext(ctx context.Context, admission Admission) error {
 	} else {
 		// Run without leader election (single replica mode)
 		klog.Info("Running without leader election")
+		setSingleReplicaLeaderMetrics(cfg)
 		certMgr, caBundleSyncer := newLeaderComponents(client, cfg, webhookRefs)
 		startCertManagement(ctx, certMgr, caBundleSyncer, errCh)
 	}
@@ -347,6 +352,10 @@ func reportAsyncError(ctx context.Context, errCh chan<- error, component string,
 
 	klog.Errorf("%s error: %v", component, err)
 	errCh <- err
+}
+
+func setSingleReplicaLeaderMetrics(cfg Config) {
+	metrics.UpdateLeaderMetrics(cfg.Namespace, cfg.LeaderElectionID, getRuntimeIdentity())
 }
 
 // validateCertDurations validates that certificate duration configurations are valid.

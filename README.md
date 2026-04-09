@@ -265,8 +265,10 @@ The framework exposes Prometheus metrics on a separate HTTP port (default: 8080)
 | `admission_webhook_certificate_expiry_timestamp_seconds` | Gauge | `type` | Certificate expiry timestamp (unix seconds) |
 | `admission_webhook_certificate_not_before_timestamp_seconds` | Gauge | `type` | Certificate not-before timestamp (unix seconds) |
 | `admission_webhook_certificate_valid_duration_seconds` | Gauge | `type` | Total certificate validity duration (seconds) |
+| `admission_webhook_leader_info` | Gauge | `namespace`, `lease`, `holder_identity` | Current leader identity for the lease. `holder_identity=""` means no leader is currently held |
+| `admission_webhook_has_leader` | Gauge | `namespace`, `lease` | Whether the leader election lease currently has a holder (`1` = yes, `0` = no) |
 
-Example Prometheus alert:
+Recommended alerts:
 
 ```yaml
 groups:
@@ -279,7 +281,36 @@ groups:
       severity: warning
     annotations:
       summary: "Webhook certificate expiring in less than 7 days"
+  - alert: WebhookCertificateExpiringIn59Days
+    expr: (admission_webhook_certificate_expiry_timestamp_seconds{type="serving"} - time()) / 86400 < 59
+    for: 1h
+    labels:
+      severity: warning
+    annotations:
+      summary: "Webhook serving certificate expires in less than 59 days"
+  - alert: WebhookHasNoLeader
+    expr: admission_webhook_has_leader == 0
+    for: 5m
+    labels:
+      severity: critical
+    annotations:
+      summary: "Webhook leader election currently has no leader"
 ```
+
+Example queries:
+
+```promql
+# Remaining serving certificate validity in days
+(admission_webhook_certificate_expiry_timestamp_seconds{type="serving"} - time()) / 86400
+
+# Current leader state
+admission_webhook_leader_info
+
+# Leases currently without a leader
+admission_webhook_leader_info{holder_identity=""} == 1
+```
+
+In single-replica mode with leader election disabled, the framework reports the current instance as leader so the same alerts and dashboards keep working.
 
 ## Examples
 

@@ -3,11 +3,15 @@ package autocertwebhook
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/jimyag/auto-cert-webhook/internal/cabundle"
+	"github.com/jimyag/auto-cert-webhook/internal/metrics"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
@@ -626,4 +630,28 @@ func TestReportAsyncError(t *testing.T) {
 			t.Fatal("expected error to be reported")
 		}
 	})
+}
+
+func TestSetSingleReplicaLeaderMetrics(t *testing.T) {
+	t.Setenv("POD_NAME", "single-replica-pod")
+
+	cfg := Config{
+		Namespace:        "single-replica-test",
+		LeaderElectionID: "single-replica-test-leader",
+	}
+
+	metrics.Register()
+	setSingleReplicaLeaderMetrics(cfg)
+
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	rec := httptest.NewRecorder()
+	metrics.Handler().ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "admission_webhook_leader_info{holder_identity=\"single-replica-pod\",lease=\"single-replica-test-leader\",namespace=\"single-replica-test\"} 1") {
+		t.Fatalf("leader_info metric not found in output:\n%s", body)
+	}
+	if !strings.Contains(body, "admission_webhook_has_leader{lease=\"single-replica-test-leader\",namespace=\"single-replica-test\"} 1") {
+		t.Fatalf("has_leader metric not found in output:\n%s", body)
+	}
 }
