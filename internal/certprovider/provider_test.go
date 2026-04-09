@@ -17,7 +17,7 @@ import (
 )
 
 func TestNew(t *testing.T) {
-	client := fake.NewSimpleClientset()
+	client := fake.NewClientset()
 	provider := New(client, "test-ns", "test-secret")
 
 	if provider.namespace != "test-ns" {
@@ -32,7 +32,7 @@ func TestNew(t *testing.T) {
 }
 
 func TestProvider_Ready(t *testing.T) {
-	client := fake.NewSimpleClientset()
+	client := fake.NewClientset()
 	provider := New(client, "test-ns", "test-secret")
 
 	// Initially not ready
@@ -48,7 +48,7 @@ func TestProvider_Ready(t *testing.T) {
 }
 
 func TestProvider_GetCertificate_NotLoaded(t *testing.T) {
-	client := fake.NewSimpleClientset()
+	client := fake.NewClientset()
 	provider := New(client, "test-ns", "test-secret")
 
 	_, err := provider.GetCertificate(nil)
@@ -58,7 +58,7 @@ func TestProvider_GetCertificate_NotLoaded(t *testing.T) {
 }
 
 func TestProvider_GetCertificate_Loaded(t *testing.T) {
-	client := fake.NewSimpleClientset()
+	client := fake.NewClientset()
 	provider := New(client, "test-ns", "test-secret")
 
 	// Create a test certificate
@@ -94,7 +94,7 @@ func TestProvider_GetCertificate_Loaded(t *testing.T) {
 }
 
 func TestProvider_onSecretUpdate_NoCert(t *testing.T) {
-	client := fake.NewSimpleClientset()
+	client := fake.NewClientset()
 	provider := New(client, "test-ns", "test-secret")
 
 	// Secret without tls.crt
@@ -114,7 +114,7 @@ func TestProvider_onSecretUpdate_NoCert(t *testing.T) {
 }
 
 func TestProvider_onSecretUpdate_NoKey(t *testing.T) {
-	client := fake.NewSimpleClientset()
+	client := fake.NewClientset()
 	provider := New(client, "test-ns", "test-secret")
 
 	certPEM, _ := generateTestCert(t)
@@ -138,7 +138,7 @@ func TestProvider_onSecretUpdate_NoKey(t *testing.T) {
 }
 
 func TestProvider_onSecretUpdate_InvalidCert(t *testing.T) {
-	client := fake.NewSimpleClientset()
+	client := fake.NewClientset()
 	provider := New(client, "test-ns", "test-secret")
 
 	// Secret with invalid certificate data
@@ -161,7 +161,7 @@ func TestProvider_onSecretUpdate_InvalidCert(t *testing.T) {
 }
 
 func TestProvider_loadCertificate_NotFound(t *testing.T) {
-	client := fake.NewSimpleClientset()
+	client := fake.NewClientset()
 	provider := New(client, "test-ns", "test-secret")
 
 	ctx := context.Background()
@@ -186,7 +186,7 @@ func TestProvider_loadCertificate_Exists(t *testing.T) {
 		},
 	}
 
-	client := fake.NewSimpleClientset(secret)
+	client := fake.NewClientset(secret)
 	provider := New(client, "test-ns", "test-secret")
 
 	ctx := context.Background()
@@ -204,7 +204,7 @@ func TestProvider_CertificateReload(t *testing.T) {
 	certPEM1, keyPEM1 := generateTestCert(t)
 	certPEM2, keyPEM2 := generateTestCert(t)
 
-	client := fake.NewSimpleClientset()
+	client := fake.NewClientset()
 	provider := New(client, "test-ns", "test-secret")
 
 	// Initially not ready

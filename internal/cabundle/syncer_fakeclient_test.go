@@ -11,7 +11,7 @@ import (
 )
 
 func TestSyncer_syncCABundle_NotFound(t *testing.T) {
-	client := fake.NewSimpleClientset()
+	client := fake.NewClientset()
 	syncer := NewSyncer(client, "test-ns", "ca-bundle", nil)
 
 	ctx := context.Background()
@@ -49,7 +49,7 @@ func TestSyncer_syncCABundle_Found(t *testing.T) {
 		},
 	}
 
-	client := fake.NewSimpleClientset(cm, webhookConfig)
+	client := fake.NewClientset(cm, webhookConfig)
 
 	refs := []WebhookRef{
 		{Name: "test-webhook", Type: MutatingWebhook},
@@ -96,7 +96,7 @@ func TestSyncer_patchValidatingWebhook(t *testing.T) {
 		},
 	}
 
-	client := fake.NewSimpleClientset(webhookConfig)
+	client := fake.NewClientset(webhookConfig)
 	syncer := NewSyncer(client, "test-ns", "ca-bundle", nil)
 
 	ctx := context.Background()
@@ -134,7 +134,7 @@ func TestSyncer_patchMutatingWebhook(t *testing.T) {
 		},
 	}
 
-	client := fake.NewSimpleClientset(webhookConfig)
+	client := fake.NewClientset(webhookConfig)
 	syncer := NewSyncer(client, "test-ns", "ca-bundle", nil)
 
 	ctx := context.Background()
@@ -155,7 +155,7 @@ func TestSyncer_patchMutatingWebhook(t *testing.T) {
 }
 
 func TestSyncer_patchWebhook_NotFound(t *testing.T) {
-	client := fake.NewSimpleClientset()
+	client := fake.NewClientset()
 	syncer := NewSyncer(client, "test-ns", "ca-bundle", nil)
 
 	ctx := context.Background()
@@ -173,7 +173,7 @@ func TestSyncer_patchWebhook_NotFound(t *testing.T) {
 }
 
 func TestSyncer_patchWebhook_UnknownType(t *testing.T) {
-	client := fake.NewSimpleClientset()
+	client := fake.NewClientset()
 	syncer := NewSyncer(client, "test-ns", "ca-bundle", nil)
 
 	ctx := context.Background()
@@ -185,7 +185,7 @@ func TestSyncer_patchWebhook_UnknownType(t *testing.T) {
 }
 
 func TestSyncer_onConfigMapUpdate_NoCABundle(t *testing.T) {
-	client := fake.NewSimpleClientset()
+	client := fake.NewClientset()
 	syncer := NewSyncer(client, "test-ns", "ca-bundle", nil)
 
 	// ConfigMap without ca-bundle.crt
@@ -241,7 +241,7 @@ func TestSyncer_syncMultipleWebhooks(t *testing.T) {
 		},
 	}
 
-	client := fake.NewSimpleClientset(cm, mutatingWebhook, validatingWebhook)
+	client := fake.NewClientset(cm, mutatingWebhook, validatingWebhook)
 
 	refs := []WebhookRef{
 		{Name: "mutating-webhook", Type: MutatingWebhook},
@@ -288,7 +288,7 @@ func TestSyncer_EmptyWebhookRefs(t *testing.T) {
 		},
 	}
 
-	client := fake.NewSimpleClientset(cm)
+	client := fake.NewClientset(cm)
 
 	// No webhook refs
 	syncer := NewSyncer(client, "test-ns", "ca-bundle", nil)
@@ -338,7 +338,7 @@ func TestSyncer_WebhookWithMultipleHooks(t *testing.T) {
 		},
 	}
 
-	client := fake.NewSimpleClientset(cm, webhookConfig)
+	client := fake.NewClientset(cm, webhookConfig)
 
 	refs := []WebhookRef{
 		{Name: "multi-hook-webhook", Type: ValidatingWebhook},
@@ -392,7 +392,7 @@ func TestSyncer_EmptyCABundleData(t *testing.T) {
 		},
 	}
 
-	client := fake.NewSimpleClientset(cm, webhookConfig)
+	client := fake.NewClientset(cm, webhookConfig)
 
 	refs := []WebhookRef{
 		{Name: "test-webhook", Type: MutatingWebhook},
@@ -443,7 +443,7 @@ func TestSyncer_MissingCABundleKey(t *testing.T) {
 		},
 	}
 
-	client := fake.NewSimpleClientset(cm, webhookConfig)
+	client := fake.NewClientset(cm, webhookConfig)
 
 	refs := []WebhookRef{
 		{Name: "test-webhook", Type: MutatingWebhook},

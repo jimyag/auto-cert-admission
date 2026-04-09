@@ -20,9 +20,9 @@ const (
 )
 
 var (
-	scheme    *runtime.Scheme
-	codecs    serializer.CodecFactory
-	schemeErr error
+	scheme     *runtime.Scheme
+	codecs     serializer.CodecFactory
+	schemeErr  error
 	schemeOnce sync.Once
 )
 

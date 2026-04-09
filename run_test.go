@@ -1,11 +1,14 @@
 package autocertwebhook
 
 import (
+	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/jimyag/auto-cert-webhook/internal/cabundle"
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 func TestApplyEnvConfig_Priority(t *testing.T) {
@@ -512,6 +515,115 @@ func TestDetermineWebhookRefs(t *testing.T) {
 
 		if len(refs) != 0 {
 			t.Errorf("Expected 0 refs, got %d", len(refs))
+		}
+	})
+}
+
+func TestNewLeaderComponentsReturnsFreshInstances(t *testing.T) {
+	cfg := Config{
+		Namespace:             "test-ns",
+		ServiceName:           "test-svc",
+		CASecretName:          "test-ca",
+		CertSecretName:        "test-cert",
+		CABundleConfigMapName: "test-ca-bundle",
+		CAValidity:            48 * time.Hour,
+		CARefresh:             24 * time.Hour,
+		CertValidity:          24 * time.Hour,
+		CertRefresh:           12 * time.Hour,
+		CertSyncInterval:      time.Minute,
+	}
+	webhookRefs := []cabundle.WebhookRef{{Name: "test", Type: cabundle.ValidatingWebhook}}
+	client := fake.NewClientset()
+
+	certMgr1, syncer1 := newLeaderComponents(client, cfg, webhookRefs)
+	certMgr2, syncer2 := newLeaderComponents(client, cfg, webhookRefs)
+
+	if certMgr1 == certMgr2 {
+		t.Fatal("expected fresh cert manager instance per call")
+	}
+	if syncer1 == syncer2 {
+		t.Fatal("expected fresh CA bundle syncer instance per call")
+	}
+}
+
+func TestNewLeaderComponentConfigs(t *testing.T) {
+	cfg := Config{
+		Namespace:             "test-ns",
+		ServiceName:           "test-svc",
+		CASecretName:          "test-ca",
+		CertSecretName:        "test-cert",
+		CABundleConfigMapName: "test-ca-bundle",
+		CAValidity:            48 * time.Hour,
+		CARefresh:             24 * time.Hour,
+		CertValidity:          24 * time.Hour,
+		CertRefresh:           12 * time.Hour,
+		CertSyncInterval:      time.Minute,
+	}
+	webhookRefs := []cabundle.WebhookRef{{Name: "test", Type: cabundle.ValidatingWebhook}}
+
+	certCfg := newLeaderCertManagerConfig(cfg)
+	if certCfg.Namespace != cfg.Namespace {
+		t.Fatalf("cert manager namespace = %q, want %q", certCfg.Namespace, cfg.Namespace)
+	}
+	if certCfg.ServiceName != cfg.ServiceName {
+		t.Fatalf("cert manager service name = %q, want %q", certCfg.ServiceName, cfg.ServiceName)
+	}
+	if certCfg.CABundleConfigMapName != cfg.CABundleConfigMapName {
+		t.Fatalf("cert manager configmap name = %q, want %q", certCfg.CABundleConfigMapName, cfg.CABundleConfigMapName)
+	}
+
+	syncerCfg := newLeaderSyncerConfig(cfg, webhookRefs)
+	if syncerCfg.Namespace != cfg.Namespace {
+		t.Fatalf("syncer namespace = %q, want %q", syncerCfg.Namespace, cfg.Namespace)
+	}
+	if syncerCfg.CABundleConfigMapName != cfg.CABundleConfigMapName {
+		t.Fatalf("syncer configmap name = %q, want %q", syncerCfg.CABundleConfigMapName, cfg.CABundleConfigMapName)
+	}
+	if len(syncerCfg.WebhookRefs) != len(webhookRefs) || syncerCfg.WebhookRefs[0] != webhookRefs[0] {
+		t.Fatalf("syncer webhook refs = %#v, want %#v", syncerCfg.WebhookRefs, webhookRefs)
+	}
+	syncerCfg.WebhookRefs[0].Name = "mutated"
+	if webhookRefs[0].Name != "test" {
+		t.Fatal("expected webhook refs to be copied")
+	}
+}
+
+func TestReportAsyncError(t *testing.T) {
+	t.Run("ignores nil error", func(t *testing.T) {
+		errCh := make(chan error, 1)
+		reportAsyncError(context.Background(), errCh, "test", nil)
+		select {
+		case err := <-errCh:
+			t.Fatalf("unexpected error sent: %v", err)
+		default:
+		}
+	})
+
+	t.Run("ignores error after context cancellation", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		errCh := make(chan error, 1)
+		reportAsyncError(ctx, errCh, "test", errors.New("context canceled during startup"))
+		select {
+		case err := <-errCh:
+			t.Fatalf("unexpected error sent: %v", err)
+		default:
+		}
+	})
+
+	t.Run("reports real error while context active", func(t *testing.T) {
+		errCh := make(chan error, 1)
+		want := errors.New("boom")
+		reportAsyncError(context.Background(), errCh, "test", want)
+
+		select {
+		case got := <-errCh:
+			if !errors.Is(got, want) {
+				t.Fatalf("reported error = %v, want %v", got, want)
+			}
+		default:
+			t.Fatal("expected error to be reported")
 		}
 	})
 }

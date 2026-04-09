@@ -203,4 +203,3 @@ func (s *Syncer) patchMutatingWebhook(ctx context.Context, name string, caBundle
 		ctx, name, types.JSONPatchType, patchBytes, metav1.PatchOptions{})
 	return err
 }
-
