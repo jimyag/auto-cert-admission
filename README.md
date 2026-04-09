@@ -310,6 +310,8 @@ admission_webhook_leader_info
 admission_webhook_leader_info{holder_identity=""} == 1
 ```
 
+In single-replica mode with leader election disabled, the framework reports the current instance as leader so the same alerts and dashboards keep working.
+
 ## Examples
 
 Complete working examples with deployment manifests and test scripts:

@@ -176,6 +176,7 @@ func RunWithContext(ctx context.Context, admission Admission) error {
 	} else {
 		// Run without leader election (single replica mode)
 		klog.Info("Running without leader election")
+		setSingleReplicaLeaderMetrics(cfg)
 		certMgr, caBundleSyncer := newLeaderComponents(client, cfg, webhookRefs)
 		startCertManagement(ctx, certMgr, caBundleSyncer, errCh)
 	}
@@ -351,6 +352,10 @@ func reportAsyncError(ctx context.Context, errCh chan<- error, component string,
 
 	klog.Errorf("%s error: %v", component, err)
 	errCh <- err
+}
+
+func setSingleReplicaLeaderMetrics(cfg Config) {
+	metrics.UpdateLeaderMetrics(cfg.Namespace, cfg.LeaderElectionID, getRuntimeIdentity())
 }
 
 // validateCertDurations validates that certificate duration configurations are valid.
