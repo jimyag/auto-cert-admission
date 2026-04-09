@@ -150,6 +150,12 @@ func RunWithContext(ctx context.Context, admission Admission) error {
 
 	leaderElectionEnabled := cfg.LeaderElection == nil || *cfg.LeaderElection
 	if leaderElectionEnabled {
+		go func() {
+			if err := metrics.StartLeaderObserver(ctx, client, cfg.Namespace, cfg.LeaderElectionID); err != nil && ctx.Err() == nil {
+				klog.Errorf("leader metrics observer error: %v", err)
+			}
+		}()
+
 		// Run with leader election
 		go func() {
 			reportAsyncError(ctx, errCh, "leader election", leaderelection.Run(ctx, client, leaderelection.Config{
