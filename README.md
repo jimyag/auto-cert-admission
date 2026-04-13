@@ -208,17 +208,28 @@ webhooks:
 
 ## Required RBAC
 
+The ServiceAccount running the webhook needs the following permissions:
+
 ```yaml
 rules:
+# Certificate management: the framework reads, creates, and rotates CA/serving
+# certificate Secrets, and writes the CA bundle to a ConfigMap for client use.
 - apiGroups: [""]
   resources: ["secrets", "configmaps"]
   verbs: ["get", "list", "watch", "create", "update"]
+# Leader election: Lease objects are used to elect one replica as the active
+# certificate manager. list/watch are required by the controller-runtime
+# leader election informer to monitor lease state and emit metrics.
 - apiGroups: ["coordination.k8s.io"]
   resources: ["leases"]
-  verbs: ["get", "create", "update"]
+  verbs: ["get", "list", "watch", "create", "update"]
+# caBundle sync: the leader patches the caBundle field in WebhookConfiguration
+# objects so the API server can validate the webhook's TLS certificate.
 - apiGroups: ["admissionregistration.k8s.io"]
   resources: ["mutatingwebhookconfigurations", "validatingwebhookconfigurations"]
   verbs: ["get", "update", "patch"]
+# Events: leader election and certificate rotation emit Kubernetes events for
+# observability.
 - apiGroups: [""]
   resources: ["events"]
   verbs: ["create", "patch"]
