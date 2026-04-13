@@ -218,7 +218,7 @@ rules:
   resources: ["secrets", "configmaps"]
   verbs: ["get", "list", "watch", "create", "update"]
 # Leader election: Lease objects are used to elect one replica as the active
-# certificate manager. list/watch are required by the controller-runtime
+# certificate manager. list/watch are required by the framework's
 # leader election informer to monitor lease state and emit metrics.
 - apiGroups: ["coordination.k8s.io"]
   resources: ["leases"]
