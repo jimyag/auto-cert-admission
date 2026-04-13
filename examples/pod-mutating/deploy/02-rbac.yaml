@@ -12,7 +12,7 @@ rules:
 # Leader election
 - apiGroups: ["coordination.k8s.io"]
   resources: ["leases"]
-  verbs: ["get", "create", "update"]
+  verbs: ["get", "list", "watch", "create", "update"]
 # Webhook configuration patching
 - apiGroups: ["admissionregistration.k8s.io"]
   resources: ["mutatingwebhookconfigurations", "validatingwebhookconfigurations"]
